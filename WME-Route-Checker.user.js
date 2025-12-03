@@ -6,7 +6,7 @@
 // @include             https://www.waze.com/editor*
 // @include             https://beta.waze.com/*
 // @exclude             https://www.waze.com/*user/*editor/*
-// @version             1.66
+// @version             2.02
 // @grant               GM_xmlhttpRequest
 // @connect             waze.com
 // @downloadURL https://update.greasyfork.org/scripts/3202/WME%20Route%20Checker.user.js
@@ -14,7 +14,7 @@
 // ==/UserScript==
 
 // globals
-var wmerc_version = "1.65";
+var wmerc_version = "2.02";
 
 var AVOID_TOLLS = 1;
 var AVOID_FREEWAYS = 2;
@@ -22,6 +22,8 @@ var AVOID_DIRT = 4;
 var ALLOW_UTURNS = 16;
 var VEHICLE_TAXI = 64;
 var VEHICLE_BIKE = 128;
+var roadTypes;
+var wmeSDK;
 
 var route_options = ALLOW_UTURNS; // default
 
@@ -53,6 +55,7 @@ function addRouteCheckerTab(tabPane) {
   tabPane.appendChild(routeOptions);
 
   var lang = I18n.translations[I18n.locale];
+  roadTypes = I18n.t("segment.road_types");
 
   if (location.hostname.match(/editor.*.waze.com/)) {
     var coords1 = getCoords(W.selectionManager.getSelectedWMEFeatures()[0]);
@@ -373,19 +376,24 @@ function showInstructions(instructions, nav_json, r) {
   var currentItem = null;
   var totalDist = 0;
   var totalTime = 0;
+  var crossTimeBeforeInstruction = 0;
+  var distanceBeforeInstruction = 0;
   var isToll = false;
   var isRestricted = 0;
   //var detourSaving = 0;
 
   // street name at starting point
   var streetName = streetNames[route.results[0].street];
-  var departFrom = 'depart';
+  var coordinates = route.results[0].path;
+  let latlong = `${coordinates.y.toFixed(5)}, ${coordinates.x.toFixed(5)}`;
+  var segmentId = route.results[0].path.segmentId;
+  var departFrom = 'Depart';
   if (!streetName || streetName === null) {
-    streetName = '';
+    streetName = ` <span style="color: red; margin: 0; font-size: 0.7vw">${segmentId}<span>`;
   }
   else {
-    departFrom = `depart from ${streetName}`;
-    streetName = ` from <span style="color: blue">${streetName}<span>`;
+    departFrom = `Depart from ${streetName}`;
+    streetName = ` <span style="color: blue; margin: 0; font-size: 0.7vw">${streetName}<span>`;
   }
 
   // turn icon at starting coordinates
@@ -396,7 +404,8 @@ function showInstructions(instructions, nav_json, r) {
   // add first instruction (depart)
   currentItem = document.createElement('a');
   currentItem.className = 'step';
-  currentItem.innerHTML = `<b>${getTurnArrow('BEGIN')}</b> depart ${streetName}`;
+  currentItem.style = "text-align: left";
+  currentItem.innerHTML = `<p style="margin: 0px 3px 0px 0px; font-size: 2vw; vertical-align: text-top; float: left;" class="${getTurnArrowIcon('BEGIN')}"></p> <p style="margin:0; font-size: 0.8vw">Depart from</p> ${streetName}`;
   instructions.appendChild(currentItem);
 
   var segments = [];
@@ -436,12 +445,15 @@ function showInstructions(instructions, nav_json, r) {
 
     if (!route.results[i].instruction) {
       continue;
-	}
+    }
     var opcode = route.results[i].instruction.opcode;
     if (!opcode) {
       continue;
-	}
-
+    }
+    if (opcode === "NONE") {
+        crossTimeBeforeInstruction += route.results[i].crossTime;
+        distanceBeforeInstruction += route.results[i].length;
+    }
     // ignore these
     if (opcode.match(/ROUNDABOUT_EXIT|NONE/) && route.results[i].instruction.laneGuidance == null) {
       continue;
@@ -453,6 +465,7 @@ function showInstructions(instructions, nav_json, r) {
 
     // the arrow symbol for the turn
     var turnArrow = getTurnArrow(opcode, route.results[i].instruction.arg);
+    var turnArrowIcon = getTurnArrowIcon(opcode);
 
     // the name that TTS will read out (in blue)
     streetName = getNextStreetName(route.results, i, route.streetNames);
@@ -466,14 +479,15 @@ function showInstructions(instructions, nav_json, r) {
     }
 
     // convert opcode to pretty text
-    opcode = opcode.replace(/APPROACHING_DESTINATION/, 'arrive');
-    opcode = opcode.replace(/ROUNDABOUT_(EXIT_)?LEFT/, 'at the roundabout, turn left');
-    opcode = opcode.replace(/ROUNDABOUT_(EXIT_)?RIGHT/, 'at the roundabout, turn right');
-    opcode = opcode.replace(/ROUNDABOUT_(EXIT_)?STRAIGHT/, 'at the roundabout, continue straight');
-    opcode = opcode.replace(/ROUNDABOUT_ENTER/, 'at the roundabout, take ');
+    opcode = opcode.replace(/APPROACHING_DESTINATION/, 'Arrive');
+    opcode = opcode.replace(/CONTINUE/, 'Continue straight');
+    opcode = opcode.replace(/ROUNDABOUT_(EXIT_)?LEFT/, 'At the roundabout, turn left');
+    opcode = opcode.replace(/ROUNDABOUT_(EXIT_)?RIGHT/, 'At the roundabout, turn right');
+    opcode = opcode.replace(/ROUNDABOUT_(EXIT_)?STRAIGHT/, 'At the roundabout, continue straight');
+    opcode = opcode.replace(/ROUNDABOUT_ENTER/, 'At the roundabout, take ');
     opcode = opcode.toLowerCase().replace(/_/, ' ');
-    opcode = opcode.replace(/uturn/, 'make a U-turn');
-    opcode = opcode.replace(/roundabout u/, 'at the roundabout, make a U-turn');
+    opcode = opcode.replace(/uturn/, 'Make a U-turn');
+    opcode = opcode.replace(/roundabout u/, 'At the roundabout, make a U-turn');
 
     // convert keep to exit if needed
     var keepSide = W.model.isLeftHand ? /keep left/ : /keep right/;
@@ -487,22 +501,33 @@ function showInstructions(instructions, nav_json, r) {
     if (route.results[i].clientLaneSet != null) {
       var lanes = route.results[i].clientLaneSet.clientLane;
       var guide = route.results[i].instruction.laneGuidance;
-      laneInfo += " |";
+      //laneInfo += " \u2502";
       for (var l = 0; l < lanes.length; l++) {
+        lanes[l].angleObject = lanes[l].angleObject.sort((a, b) => a.angle - b.angle)
         if (l > 0) {
           laneInfo += "\u2506"; // dashed line
         }
-        var laneArrow = "\u2001"; // space \u00A0
+        var laneArrow = "?"; // space \u00A0
+        var laneArrowHTML = ``
         for (var a = 0; a < lanes[l].angleObject.length; a++) {
           var lane = lanes[l].angleObject[a];
-          if (lane.selected) {
-            laneArrow = getLaneArrow(lane.angle);
-          }
+            if (lanes[l].angleObject.some((e) => {return e.selected})) {
+                if (lane.selected) {
+                    laneArrow = getLaneArrow(lane.angle);
+                    laneArrowHTML += `<p style="display: inline; vertical-align: text-top;" class="${getLaneArrowIcon(lane.angle)}"></p>`
+                } else {
+                    laneArrow = getLaneArrow(lane.angle);
+                    laneArrowHTML += `<p style="display: inline; vertical-align: text-top; color: grey" class="${getLaneArrowIcon(lane.angle)}"></p>`
+                }
+            } else {
+                    laneArrow = getLaneArrow(lane.angle);
+                    laneArrowHTML += `<p style="display: inline; vertical-align: text-top; color: grey" class="${getLaneArrowIcon(lane.angle)}"></p>`
+            }
         }
-        laneInfo += ` ${laneArrow} `;
+        laneInfo += ` ${laneArrowHTML} `;
         laneIcon += laneArrow != '\u2001' ? laneArrow : '.';
       }
-      laneInfo += "| ";
+      //laneInfo += "\u2502 ";
       if (guide != null && opcode == 'none') {
         if (lanes.enable_voice_for_instruction) {
           laneInfo += "\uD83D\uDD08\uD83D\uDD08"; // View and hear
@@ -521,12 +546,18 @@ function showInstructions(instructions, nav_json, r) {
 	  var title;
       if (opcode == 'arrive') {
         var end = nav_json.coords.length - 1;
-        title = 'arrive at ' + (streetName !== '' ? streetName : 'destination');
+        title = 'Arrive at ' + (streetName !== '' ? streetName : "destination");
         addTurnArrowToMap(nav_json.coords[end], turnArrow, title);
       }
       else if (opcode != 'none') {
         title = opcode.replace(/at the roundabout, /, '');
-        if (streetName !== '') title += ` onto ${streetName}`;
+        title = title.replace(/turn/, 'Turn');
+        title = title.replace(/keep/, 'Keep');
+        title = title.replace(/exit/, 'Exit');
+        title = title.replace(/continue/, 'Continue');
+        if (streetName !== '') {
+            title += ` onto ${streetName}`
+        }
         if (laneIcon !== '') title = ` \u2502${laneIcon}\u2502 \u00A0 ${title}`;
         addTurnArrowToMap(route.results[i+1].path, turnArrow, title);
       }
@@ -536,24 +567,49 @@ function showInstructions(instructions, nav_json, r) {
     }
 
     // pretty street name
+    let currentResult = route.results[i];
+    let futureResult = route.results[i+1];
+    let currentResultPath = currentResult.path;
+    let currentLatLong = `${currentResultPath.y.toFixed(5)}, ${currentResultPath.x.toFixed(5)}`
+    let addlInfo =`Time: ${timeFromSecs(crossTimeBeforeInstruction)}\n`
+    addlInfo += `Distance: ${(distanceBeforeInstruction/1000).toFixed(2)}km / ${(distanceBeforeInstruction/1609).toFixed(2)}mi\n`
+    addlInfo += `Speed: ${(((distanceBeforeInstruction/1000) / crossTimeBeforeInstruction) * 3600).toFixed(1)}kmph / ${(((distanceBeforeInstruction/1609) / crossTimeBeforeInstruction) * 3600).toFixed(1)}mph`
     if (streetName !== '') {
-      if (opcode == 'arrive') {
-        streetName = ` at <span style="color: blue">${streetName}</span>`;
+      if (opcode !== 'none') {
+        streetName = ` <p style="color: blue; margin: 0; font-size: 0.7vw" title="${addlInfo}">${streetName}</p>`;
       }
-      else if (opcode != 'none') {
-        streetName = ` onto <span style="color: blue">${streetName}</span>`;
-      }
+    } else {
+        if (opcode != 'none') {
+            streetName = ` <p style="color: red; margin: 0; font-size: 0.7vw" title="${addlInfo}">${currentResultPath.segmentId}</p>`;
+        }
+    }
+
+    if (opcode !== "NONE") {
+        crossTimeBeforeInstruction = 0;
+        distanceBeforeInstruction = 0;
     }
 
     if (laneInfo != '') {
-      laneInfo = "<div align='center'>" + laneInfo + "</div>";
+      laneInfo = "<div style='font-family: monospace; background: black; padding: 5px; color: white; font-size: 1vw; margin: 0px 0px 3px;' align='center'>" + laneInfo + "</div>";
     }
 
     // display new instruction
     currentItem = document.createElement('a');
     currentItem.className = 'step';
+    currentItem.style = "text-align: left";
+    if(futureResult) {
+        currentItem.addEventListener("click", () => {let coords = wmeSDK.DataModel.Nodes.getById({nodeId:futureResult.path.nodeId}).geometry.coordinates; wmeSDK.Map.setMapCenter({lonLat: {lat: coords[1], lon: coords[0]}})})
+    } else {
+        currentItem.addEventListener("click", () => {var end = nav_json.coords.length - 1; wmeSDK.Map.setMapCenter({lonLat: {lat: nav_json.coords[end].y, lon: nav_json.coords[end].x}})})
+    }
+    let turnInstruction = opcode.replace(/turn/, 'Turn');
+    turnInstruction = turnInstruction.replace(/keep/, 'Keep');
+    turnInstruction = turnInstruction.replace(/exit/, 'Exit');
+    turnInstruction = turnInstruction.replace(/continue/, 'Continue');
+    turnInstruction = turnInstruction.replace(/arrive/, 'Arrive at');
+    let turnInstructionHTML = `<p style="margin: 0; font-size: 0.8vw;">${turnInstruction}</p>`
     if (opcode != 'none') {
-      currentItem.innerHTML = `<b>${turnArrow}</b> ${opcode} ${streetName} ${laneInfo}`;
+      currentItem.innerHTML = `${laneInfo} <p style="margin: 0px 3px 0px 0px; font-size: 2vw; vertical-align: text-top; float: left;" class="${turnArrowIcon}"></p> ${turnInstructionHTML} ${streetName}`;
     }
     else {
       currentItem.innerHTML = laneInfo;
@@ -564,10 +620,10 @@ function showInstructions(instructions, nav_json, r) {
     instructions.appendChild(currentItem);
   }
 
-  // append distance and time to last instruction
-  currentItem.title = `${(totalDist/1609).toFixed(3)} miles`;
-  currentItem.innerHTML += ` - ${totalDist/1000} km`;
-  currentItem.innerHTML += ` - ${timeFromSecs(totalTime)}`;
+  // append total distance and average speed
+  currentItem.innerHTML += `<p style="margin: 0;">D: ${(totalDist/1609).toFixed(1)}mi/${(totalDist/1000).toFixed(1)}km | S: ${(((totalDist/1609) / totalTime) * 3600).toFixed(1)}mph/${(((totalDist/1000) / totalTime) * 3600).toFixed(1)}kmph</p>`;
+  // append total time
+  currentItem.innerHTML += `<p style="margin: 0;">T: ${timeFromSecs(totalTime)}</p>`;
   //if (detourSaving > 0) {
   //  currentItem.innerHTML += '<br>&nbsp; <i>detour saved ' + timeFromSecs(detourSaving) + '</i>';
   //}
@@ -592,6 +648,21 @@ function getLaneArrow(angle)
     case 90: return "\u21B1";
     case 135: return "\u2198";
     case 180: return "\u21B7";
+    default: return angle;
+  }
+}
+
+function getLaneArrowIcon(angle) {
+  switch (angle) {
+    case -180: return "w-icon w-icon-turn-u-turn-left";
+    case -135: return "w-icon w-icon-turn-sharp-left";
+    case -90: return "w-icon w-icon-turn-left";
+    case -45: return "w-icon w-icon-turn-slight-left";
+    case -0: return "w-icon w-icon-turn-straight";
+    case 45: return "w-icon w-icon-turn-slight-right";
+    case 90: return "w-icon w-icon-turn-right";
+    case 135: return "w-icon w-icon-turn-sharp-right";
+    case 180: return "w-icon w-icon-turn-u-turn-right";
     default: return angle;
   }
 }
@@ -623,6 +694,10 @@ function getNextStreetName(results, index, streetNames) {
 
   // look ahead to next street name
   while (++index < results.length && streetName === '') {
+    // if PLR, never inherit name
+    if (results[index].roadType === 20) {
+        return ''
+    }
     streetName = streetNames[results[index].street];
     if (!streetName || streetName === null) {
       streetName = '';
@@ -665,6 +740,32 @@ function getTurnArrow(opcode, nth = 0) {
     case "ROUNDABOUT_ENTER":
     case "ROUNDABOUT_EXIT":           return String.fromCharCode(0x24F5 + nth - 1);
     case "ROUNDABOUT_U":              return "\u24CA"; // (U)
+  }
+  return '';
+}
+
+function getTurnArrowIcon(opcode) {
+  switch (opcode) {
+    case "BEGIN":       return "w-icon w-icon-pushpin-fill";
+    case "CONTINUE":
+    case "NONE":        return getLaneArrowIcon(0);
+    case "TURN_LEFT":   return getLaneArrowIcon(-90);
+    case "TURN_RIGHT":  return getLaneArrowIcon(+90);
+    case "KEEP_LEFT":
+    case "EXIT_LEFT":   return getLaneArrowIcon(-45);
+    case "KEEP_RIGHT":
+    case "EXIT_RIGHT":  return getLaneArrowIcon(+45);
+    case "UTURN":       return getLaneArrowIcon(-180);
+    case "APPROACHING_DESTINATION":   return "w-icon w-icon-flag-fill"; // black flag
+    case "ROUNDABOUT_LEFT":
+    case "ROUNDABOUT_EXIT_LEFT":      return getLaneArrowIcon(-45);
+    case "ROUNDABOUT_RIGHT":
+    case "ROUNDABOUT_EXIT_RIGHT":     return getLaneArrowIcon(+45);
+    case "ROUNDABOUT_STRAIGHT":
+    case "ROUNDABOUT_EXIT_STRAIGHT":  return getLaneArrowIcon(0);
+    case "ROUNDABOUT_ENTER":
+    case "ROUNDABOUT_EXIT":           return "w-icon w-icon-roundabout";
+    case "ROUNDABOUT_U":              return getLaneArrowIcon(-180);
   }
   return '';
 }
@@ -814,6 +915,8 @@ function getId(node) {
 
 function initialiseRouteChecker() {
   console.log("WME Route Checker: initialising v" + wmerc_version);
+  wmeSDK = unsafeWindow.getWmeSdk(
+      {scriptId: "route-checker", scriptName: "Route Checker"});
 
   if (localStorage.WMERouteChecker) {
     route_options = JSON.parse(localStorage.WMERouteChecker);
@@ -824,7 +927,7 @@ function initialiseRouteChecker() {
   var style = document.createElement('style');
   style.innerHTML = "#routeTest {padding: 0 4px 0 0; overflow-y: auto;}\n"
                   + "#routeTest p.route {margin: 0; padding: 4px 8px; border-bottom: silver solid 3px; background: #eee}\n"
-                  + "#routeTest a.step {display: block; margin: 0; padding: 3px 8px; text-decoration: none; color:black;border-bottom: silver solid 1px;}\n"
+                  + "#routeTest a.step {display: block; margin: 0; padding: 3px 0px; text-decoration: none; color:black;border-bottom: silver solid 1px;}\n"
                   + "#routeTest a.step:hover {background: #ffd;}\n"
                   + "#routeTest a.step:active {background: #dfd;}\n"
                   + "#routeTest a.select {color: #00f; text-align: right}\n"
@@ -846,21 +949,13 @@ function initialiseRouteChecker() {
   W.map.addLayer(WMERC_lineLayer_markers);
 
   // add tab to userscripts area
-  var tab = W.userscripts.registerSidebarTab("wmeRouteChecker");
-  tab.tabLabel.innerText = "Routes";
-  tab.tabLabel.title = "Route Checker";
-
-  W.userscripts.waitForElementConnected(tab.tabPane).then(() => {
-    addRouteCheckerTab(tab.tabPane);
-  });
+  wmeSDK.Sidebar.registerScriptTab().then(async (tab) => {
+      tab.tabLabel.innerText = "Routes";
+      tab.tabLabel.title = "Route Checker";
+      addRouteCheckerTab(tab.tabPane);
+  })
 }
 
-// bootstrap!
-if (W?.userscripts?.state?.isInitialized) {
-  initialiseRouteChecker();
-} else {
-  document.addEventListener("wme-initialized", initialiseRouteChecker, {
-    once: true,
-  });
-}
+unsafeWindow.SDK_INITIALIZED.then(initialiseRouteChecker);
+
 /* end ======================================================================= */
