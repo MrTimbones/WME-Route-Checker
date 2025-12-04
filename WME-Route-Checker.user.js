@@ -376,9 +376,7 @@ function showInstructions(instructions, nav_json, r) {
   var currentItem = null;
   var totalDist = 0;
   var totalTime = 0;
-  var totalPenalty = 0;
   var crossTimeBeforeInstruction = 0;
-  var penaltyBeforeInstruction = 0;
   var distanceBeforeInstruction = 0;
   var isToll = false;
   var isRestricted = 0;
@@ -415,7 +413,6 @@ function showInstructions(instructions, nav_json, r) {
   for (var i = 0; i < route.results.length; i++) {
     totalDist += route.results[i].length;
     totalTime += route.results[i].crossTime;
-    totalPenalty += route.results[i].penalty;
     //detourSaving += route.results[i].detourSavings;
 
     segments.push(route.results[i].path.segmentId);
@@ -455,7 +452,6 @@ function showInstructions(instructions, nav_json, r) {
     }
     if (opcode === "NONE") {
         crossTimeBeforeInstruction += route.results[i].crossTime;
-        penaltyBeforeInstruction += route.results[i].penalty;
         distanceBeforeInstruction += route.results[i].length;
     }
     // ignore these
@@ -576,7 +572,6 @@ function showInstructions(instructions, nav_json, r) {
     let currentResultPath = currentResult.path;
     let currentLatLong = `${currentResultPath.y.toFixed(5)}, ${currentResultPath.x.toFixed(5)}`
     let addlInfo =`Time: ${timeFromSecs(crossTimeBeforeInstruction)}\n`
-    addlInfo += `Penalty: ${penaltyBeforeInstruction}\n`
     addlInfo += `Distance: ${(distanceBeforeInstruction/1000).toFixed(2)}km / ${(distanceBeforeInstruction/1609).toFixed(2)}mi\n`
     addlInfo += `Speed: ${(((distanceBeforeInstruction/1000) / crossTimeBeforeInstruction) * 3600).toFixed(1)}kmph / ${(((distanceBeforeInstruction/1609) / crossTimeBeforeInstruction) * 3600).toFixed(1)}mph`
     if (streetName !== '') {
@@ -591,7 +586,6 @@ function showInstructions(instructions, nav_json, r) {
 
     if (opcode !== "NONE") {
         crossTimeBeforeInstruction = 0;
-        penaltyBeforeInstruction = 0;
         distanceBeforeInstruction = 0;
     }
 
@@ -628,8 +622,8 @@ function showInstructions(instructions, nav_json, r) {
 
   // append total distance and average speed
   currentItem.innerHTML += `<p style="margin: 0;">D: ${(totalDist/1609).toFixed(1)}mi/${(totalDist/1000).toFixed(1)}km | S: ${(((totalDist/1609) / totalTime) * 3600).toFixed(1)}mph/${(((totalDist/1000) / totalTime) * 3600).toFixed(1)}kmph</p>`;
-  // append total time and penalty
-  currentItem.innerHTML += `<p style="margin: 0;">T: ${timeFromSecs(totalTime)} | P: ${totalPenalty}</p>`;
+  // append total time
+  currentItem.innerHTML += `<p style="margin: 0;">T: ${timeFromSecs(totalTime)}</p>`;
   //if (detourSaving > 0) {
   //  currentItem.innerHTML += '<br>&nbsp; <i>detour saved ' + timeFromSecs(detourSaving) + '</i>';
   //}
