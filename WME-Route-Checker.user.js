@@ -6,7 +6,7 @@
 // @include             https://www.waze.com/editor*
 // @include             https://beta.waze.com/*
 // @exclude             https://www.waze.com/*user/*editor/*
-// @version             2.01
+// @version             2.02
 // @grant               GM_xmlhttpRequest
 // @connect             waze.com
 // @downloadURL https://update.greasyfork.org/scripts/3202/WME%20Route%20Checker.user.js
@@ -14,7 +14,7 @@
 // ==/UserScript==
 
 // globals
-var wmerc_version = "2.01";
+var wmerc_version = "2.02";
 
 var AVOID_TOLLS = 1;
 var AVOID_FREEWAYS = 2;
