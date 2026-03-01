@@ -6,7 +6,7 @@
 // @include             https://www.waze.com/editor*
 // @include             https://beta.waze.com/*
 // @exclude             https://www.waze.com/*user/*editor/*
-// @version             2.03
+// @version             2.04
 // @grant               GM_xmlhttpRequest
 // @connect             waze.com
 // @downloadURL https://update.greasyfork.org/scripts/3202/WME%20Route%20Checker.user.js
@@ -14,7 +14,7 @@
 // ==/UserScript==
 
 // globals
-var wmerc_version = "2.03";
+var wmerc_version = "2.04";
 
 var AVOID_TOLLS = 1;
 var AVOID_FREEWAYS = 2;
@@ -397,6 +397,17 @@ function showInstructions(instructions, nav_json, r) {
     } else {
         departFrom = `Depart from ${streetName}`;
         streetName = ` <span style="color: blue; margin: 0; font-size: 0.7vw; vertical-align: middle;">${streetName}<span>`
+        let segment = wmeSDK.DataModel.Segments.getById({
+            "segmentId": segmentId
+        })
+        if (segment.primaryStreetId) {
+            let street = wmeSDK.DataModel.Streets.getById({
+                "streetId": segment.primaryStreetId
+            })
+            if (street.signType) {
+                streetName = `<div><img class="sign-image" style="vertical-align: middle; width: 10%;" src="https://renderer-am.waze.com/renderer/v1/signs/${street.signType}?text=${street.signText}">` + streetName + `</div>`
+            };
+        }
     }
 
     // turn icon at starting coordinates
@@ -585,6 +596,30 @@ function showInstructions(instructions, nav_json, r) {
         if (streetName !== '') {
             if (opcode !== 'none') {
                 streetName = ` <span style="color: blue; margin: 0; font-size: 0.7vw; vertical-align: middle;">${streetName}</span>`;
+                let segment;
+                for (let a = i+3; a > i; a--) {
+                    let lookaheadResult = route.results[a];
+                    if (lookaheadResult) {
+                    segment = wmeSDK.DataModel.Segments.getById({
+                        "segmentId": lookaheadResult.path.segmentId
+                    })
+                        break;
+                    }
+
+                }
+                if (segment?.primaryStreetId) {
+                        let street = wmeSDK.DataModel.Streets.getById({
+                            "streetId": segment.primaryStreetId
+                        })
+                        if (street?.signType) {
+                            streetName = `<div><img class="sign-image" style="vertical-align: middle; width: 10%;" src="https://renderer-am.waze.com/renderer/v1/signs/${street.signType}?text=${street.signText}">` + streetName + `</div>`
+                        }
+                    }
+
+            }
+        } else {
+            if (opcode != 'none') {
+                streetName = ` <span style="color: red; margin: 0; font-size: 0.7vw vertical-align: middle;">${currentResultPath.segmentId}</span>`;
             }
         }
 
